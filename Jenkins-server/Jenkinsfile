@@ -1,0 +1,62 @@
+pipeline {
+    agent any
+
+    tools {
+        jdk 'jdk17'              // <-- This line ensures Java 17 is used
+        maven 'MAVEN3.9.9'       // Maven already defined here
+    }
+
+    environment {
+        MAVEN_HOME = tool 'MAVEN3.9.9'
+        SONARQUBE_SERVER = 'SonarQubeServer'
+        NEXUS_URL = 'http://your-nexus-url:8081/repository/your-repo/'
+        SLACK_CHANNEL = '#your-slack-channel'
+        SLACK_CREDENTIALS_ID = 'slack-webhook'
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+        stage('Build') {
+            steps {
+                sh "${MAVEN_HOME}/bin/mvn clean install -DskipTests"
+            }
+        }
+        stage('SonarQube Analysis') {
+            steps {
+                withSonarQubeEnv("${SONARQUBE_SERVER}") {
+                    sh "${MAVEN_HOME}/bin/mvn sonar:sonar"
+                }
+            }
+        }
+        stage('Upload Artifact to Nexus') {
+            steps {
+                sh '''${MAVEN_HOME}/bin/mvn deploy -DaltDeploymentRepository=repo::default::${NEXUS_URL}'''
+            }
+        }
+        stage('Notify Slack') {
+            steps {
+                slackSend (
+                    channel: "${SLACK_CHANNEL}",
+                    color: '#00FF00',
+                    message: "✅ Build and Deployment Successful for ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                    webhookTokenCredentialId: "${SLACK_CREDENTIALS_ID}"
+                )
+            }
+        }
+    }
+    post {
+        failure {
+            slackSend (
+                channel: "${SLACK_CHANNEL}",
+                color: '#FF0000',
+                message: "❌ Build Failed for ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                webhookTokenCredentialId: "${SLACK_CREDENTIALS_ID}"
+            )
+        }
+    }
+}
+
